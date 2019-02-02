@@ -1,0 +1,118 @@
+Resizing Images in Magento 2
+
+
+First of all, Why we need to resize the image when we can overwrite original images?
+
+While working on the custom module with images or making a custom theme where you want to fetch product or category images on a certain page and we do face such problems like Image showing as different sizes on the frontend. 
+There are two ways to overcome this situation. First is using CSS but its not recomananded. Second is resizing actual image and save it to cache folder.
+
+What are the benefits of resizing the actual image file instead of using CSS to resize them in HTML?
+
+Aside from bandwidth and server space, the default resize utility provided by CSS is not content aware and does a very poor job in resizing the images if the source and the target image sizes vary greatly. The results of the utility vary from cropping the image and retaining only its central part or resizing the entire image invariably introducing visually unpleasant artifacts.  
+
+How to resize actual image in magento 2?
+
+In this blog, I am going to explain how to save resized image to a cache folder and every time it returns the image when requested and it won’t overwrite the original image.
+
+For example, you have added 400*300 sized image for one category and now you want to display that category image on the home page with a size 256*180. It is not feasible to way to resize original file every time its request so we just simply add resized image which is 256*180 in the cache folder and then every time when its requested it returns the image from the cache. This method is defined on a helper class so, you can call it from any class, block or template.
+Step 1: You need to create helper class file Image.php at Vender\Module\Helper\Image.php and the past below code.
+
+<?php
+namespace Vender\Module\Helper;
+use Magento\Framework\Filesystem;
+use Magento\Framework\Url;
+use Magento\Framework\App\Helper\AbstractHelper;
+use Magento\Framework\App\Filesystem\DirectoryList;
+class Image extends \Magento\Framework\App\Helper\AbstractHelper {
+    protected $scopeConfig;
+    protected $storeManager;
+    protected $messageManager;
+    protected $_response;
+    protected $_resourceConfig;
+    protected $_responseFactory;
+    protected $_url;
+    protected $_filesystem;
+    protected $_directory;
+    protected $_imageFactory;
+    public function __construct(
+        \Magento\Framework\App\Config\ScopeConfigInterface $scopeConfig,
+        \Magento\Store\Model\StoreManagerInterface $storeManager,
+        \Magento\Framework\Message\ManagerInterface $messageManager,
+        \Magento\Framework\App\ResponseInterface $response,
+        \Magento\Framework\App\Config\Storage\WriterInterface $resourceConfig,
+        \Magento\Framework\App\ResponseFactory $responseFactory,
+        \Magento\Framework\UrlInterface $url,
+        \Magento\Framework\Filesystem $filesystem,
+        \Magento\Framework\Image\AdapterFactory $imageFactory
+    )
+    {
+        $this->scopeConfig = $scopeConfig;
+        $this->_storeManager=$storeManager;
+        $this->messageManager=$messageManager;
+        $this->_response=$response;
+        $this->_resourceConfig=$resourceConfig;
+         $this->_responseFactory = $responseFactory;
+        $this->_url = $url;
+        $this->_filesystem = $filesystem;
+        $this->_directory = $filesystem->getDirectoryWrite(DirectoryList::MEDIA);
+        $this->_imageFactory = $imageFactory;
+    }
+    public function imageResize(
+    $src,
+    $width=35,
+    $height=35,
+    $dir='resized/'
+    ){
+        $absPath = $this->_filesystem
+        ->getDirectoryRead(DirectoryList::MEDIA)
+        ->getAbsolutePath().$src;
+        $imageResized = $this->_filesystem
+        ->getDirectoryRead(DirectoryList::MEDIA)
+        ->getAbsolutePath($dir).
+        $this->getNewDirectoryImage($src);
+        $imageResize = $this->_imageFactory->create(); 
+        $imageResize->open($absPath);
+        $imageResize->backgroundColor([255, 255, 255]);
+        $imageResize->constrainOnly(TRUE);
+        $imageResize->keepTransparency(TRUE);
+        $imageResize->keepFrame(true);
+        $imageResize->keepAspectRatio(true);
+        $imageResize->resize($width,$height);
+        $dest = $imageResized ;
+        $imageResize->save($dest);
+        $resizedURL= $this->_storeManager->getStore()
+        ->getBaseUrl(\Magento\Framework\UrlInterface::URL_TYPE_MEDIA).
+        $dir.$this->getNewDirectoryImage($src);
+        return $resizedURL;
+    }
+    public function getNewDirectoryImage($src){
+        $segments = array_reverse(explode('/',$src));
+        $first_dir = substr($segments[0],0,1);
+        $second_dir = substr($segments[0],1,1);
+        return 'cache/'.$first_dir.'/'.$second_dir.'/'.$segments[0];
+    }
+}
+
+Step 2: Using below code you can call above imageResize() method from any class, block or templete.
+$objectManager = \Magento\Framework\App\ObjectManager::getInstance();
+$imgpath = $objectManager->create('Vender\Module\Helper\Image')->imageResize('IMAGE_PATH','50','50','YOUR_DIR_NAME/');
+
+Here You got the output as 50×50 Resize image.
+
+Now I am going to explain the methods I have used
+
+1.    getDirectoryRead() :
+      While building your custom extension, you will usually need a path to your extension's files. However, sometimes you will need to get a root folder or maybe to media folder.
+2.    getAbsolutePath() : here you will be able to get the absolute path to save cache. We have to pass folder name in the parameter.
+3.    backgroundColor(): used to set background color
+4.    constrainOnly(): 
+		->constrainOnly(true): This will not resize an image that is smaller than the dimensions inside the resize() part. The default value is true in Magento 2.1.
+		->constrainOnly(false): This will resize an image that is smaller than the dimensions inside the resize() part
+5.    keepTransparency()
+6.    keepFrame():
+		->keepFrame(true): Properly remove white image frame upon resizing photos in Magento
+		->keepFrame(false): Properly doesn't remove white image frame upon resizing photos in Magento
+7.    keepAspectRatio(): 
+		->keepAspectRatio(true): It maintains the ratio. if a graphic has an aspect ratio of 2:1, it means that the width is twice as large as the height. When resizing graphics, it is important to maintain the aspect ratio
+		resize
+		->keepAspectRatio(false): It doesn't maintain the ratio.
